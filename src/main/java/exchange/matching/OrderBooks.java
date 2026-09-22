@@ -2,6 +2,7 @@ package exchange.matching;
 
 import exchange.common.IdSequence;
 import exchange.domain.CurrencyPair;
+import exchange.persistence.ExchangeStore;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -11,12 +12,18 @@ public final class OrderBooks {
 
     private final Map<CurrencyPair, OrderBook> booksByPair = new ConcurrentHashMap<>();
     private final IdSequence tradeIds;
+    private final ExchangeStore store;
 
     public OrderBooks(IdSequence tradeIds) {
+        this(tradeIds, null);
+    }
+
+    public OrderBooks(IdSequence tradeIds, ExchangeStore store) {
         this.tradeIds = tradeIds;
+        this.store = store;
     }
 
     public OrderBook forPair(CurrencyPair pair) {
-        return booksByPair.computeIfAbsent(pair, newPair -> new OrderBook(newPair, tradeIds));
+        return booksByPair.computeIfAbsent(pair, newPair -> new OrderBook(newPair, tradeIds, store));
     }
 }

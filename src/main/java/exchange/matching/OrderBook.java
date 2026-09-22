@@ -5,6 +5,7 @@ import exchange.domain.CurrencyPair;
 import exchange.domain.Order;
 import exchange.domain.Side;
 import exchange.domain.Trade;
+import exchange.persistence.ExchangeStore;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -29,24 +30,41 @@ public final class OrderBook {
 
     private final CurrencyPair pair;
     private final IdSequence tradeIds;
+    private final ExchangeStore store;
     private final Queue<Order> buyOrders = new PriorityQueue<>(BUY_PRIORITY);
     private final Queue<Order> sellOrders = new PriorityQueue<>(SELL_PRIORITY);
 
     public OrderBook(CurrencyPair pair, IdSequence tradeIds) {
+        this(pair, tradeIds, null);
+    }
+
+    public OrderBook(CurrencyPair pair, IdSequence tradeIds, ExchangeStore store) {
         this.pair = pair;
         this.tradeIds = tradeIds;
+        this.store = store;
     }
 
     /**
      * Принимает новый ордер, исполняет его против ждущих и возвращает получившиеся сделки.
      * Что не исполнилось, остаётся в книге.
+     * При наличии хранилища все изменения фиксируются в нём (в текущей транзакции).
      */
     public synchronized List<Trade> place(Order incoming) {
         List<Trade> trades = matchAgainstWaitingOrders(incoming);
         if (!incoming.isFilled()) {
             waitingOrders(incoming.side()).add(incoming);
         }
+        if (store != null) {
+            store.saveOrder(pair, incoming);
+        }
         return trades;
+    }
+
+    /** Кладёт заявку в книгу без матчинга — используется при восстановлении из хранилища. */
+    public synchronized void restore(Order waiting) {
+        if (!waiting.isFilled()) {
+            waitingOrders(waiting.side()).add(waiting);
+        }
     }
 
     private List<Trade> matchAgainstWaitingOrders(Order incoming) {
@@ -77,8 +95,13 @@ public final class OrderBook {
         Order seller = incoming.side() == Side.BUY ? waiting : incoming;
 
         // Сделка проходит по цене ордера, который ждал в книге.
-        return new Trade(tradeIds.next(), pair, waiting.limitPrice(), amount,
+        Trade trade = new Trade(tradeIds.next(), pair, waiting.limitPrice(), amount,
                 buyer.clientId(), seller.clientId());
+        if (store != null) {
+            store.saveOrder(pair, waiting);
+            store.saveTrade(trade);
+        }
+        return trade;
     }
 
     private Queue<Order> waitingOrders(Side side) {
