@@ -6,6 +6,7 @@ import exchange.domain.CurrencyPair;
 import exchange.domain.Side;
 import exchange.domain.Trade;
 import exchange.support.RecordingListener;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -17,19 +18,31 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class ExchangeTest {
+/**
+ * Сценарии поведения биржи, не зависящие от способа подключения.
+ * Наследник выбирает, как доставить ExchangeApi: in-process или по UDP.
+ */
+abstract class AbstractExchangeApiTest {
 
-    private static final CurrencyPair EUR_USD = new CurrencyPair("EUR", "USD");
+    protected static final CurrencyPair EUR_USD = new CurrencyPair("EUR", "USD");
 
-    private ExchangeApi exchange;
-    private RecordingListener vasya;
-    private RecordingListener petya;
+    protected ExchangeApi exchange;
+    protected RecordingListener vasya;
+    protected RecordingListener petya;
+
+    /** Создаёт биржу для теста: in-process, через UDP и т.д. */
+    protected abstract ExchangeApi createExchange();
 
     @BeforeEach
     void setUp() {
-        exchange = ExchangeFactory.createInMemory();
+        exchange = createExchange();
         vasya = new RecordingListener();
         petya = new RecordingListener();
+    }
+
+    @AfterEach
+    void tearDown() {
+        exchange.close();
     }
 
     @Test
@@ -115,7 +128,7 @@ class ExchangeTest {
                 () -> request("Vasya", Side.BUY, "1.10", "-5"));
     }
 
-    private static OrderRequest request(String clientId, Side side, String price, String amount) {
+    protected static OrderRequest request(String clientId, Side side, String price, String amount) {
         return new OrderRequest(clientId, EUR_USD, side, d(price), d(amount));
     }
 }
