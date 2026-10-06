@@ -2,6 +2,8 @@ package exchange.notification;
 
 import exchange.api.ClientListener;
 import exchange.domain.Trade;
+import exchange.metrics.ExchangeMetrics;
+import exchange.metrics.PrometheusExchangeMetrics;
 import exchange.persistence.ExchangeStore;
 
 import java.util.ArrayDeque;
@@ -14,6 +16,7 @@ import java.util.Queue;
  * Доставляет оповещения онлайн-клиентам сразу, а для тех, кто не в сети,
  * складывает их в «почтовый ящик» и отдаёт при подключении.
  * Методы синхронизированы, чтобы оповещение не потерялось в момент подключения клиента.
+ * Каждая фактическая доставка оповещения (вызов onTrade) учитывается в метриках (ExchangeMetrics).
  * <p>
  * С хранилищем (H2) очередь живёт в БД: строки добавляются в одной транзакции со сделкой
  * (см. Exchange.placeOrder), а здесь только доставляются и удаляются — ничего не теряется
@@ -24,13 +27,19 @@ public final class MailboxNotificationService implements TradeNotifier, ClientCo
     private final Map<String, ClientListener> onlineClients = new HashMap<>();
     private final Map<String, Queue<Trade>> mailboxes = new HashMap<>();
     private final ExchangeStore store;
+    private final ExchangeMetrics metrics;
 
     public MailboxNotificationService() {
-        this(null);
+        this(null, new PrometheusExchangeMetrics());
     }
 
     public MailboxNotificationService(ExchangeStore store) {
+        this(store, new PrometheusExchangeMetrics());
+    }
+
+    public MailboxNotificationService(ExchangeStore store, ExchangeMetrics metrics) {
         this.store = store;
+        this.metrics = Objects.requireNonNull(metrics, "Метрики не заданы");
     }
 
     @Override
@@ -58,6 +67,7 @@ public final class MailboxNotificationService implements TradeNotifier, ClientCo
             deliverStoredTrades(clientId, listener);
         } else {
             listener.onTrade(trade);
+            metrics.notificationDelivered();
         }
     }
 
@@ -67,13 +77,17 @@ public final class MailboxNotificationService implements TradeNotifier, ClientCo
             // но не потерять.
             for (Trade trade : store.loadNotifications(clientId)) {
                 listener.onTrade(trade);
+                metrics.notificationDelivered();
             }
             store.deleteNotifications(clientId);
             return;
         }
         Queue<Trade> stored = mailboxes.remove(clientId);
         if (stored != null) {
-            stored.forEach(listener::onTrade);
+            for (Trade trade : stored) {
+                listener.onTrade(trade);
+                metrics.notificationDelivered();
+            }
         }
     }
 
